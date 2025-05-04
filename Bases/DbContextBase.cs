@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.AspNetCore.Http;
 
 namespace STZ.Shared.Bases;
+
 using Microsoft.EntityFrameworkCore;
 
 public class DbContextBase : DbContext
@@ -11,14 +12,15 @@ public class DbContextBase : DbContext
     private readonly IConfiguration _configuration;
     private readonly ILogger? _logger;
     private readonly IHttpContextAccessor? _httpContextAccessor;
-    
-    public DbContextBase(IConfiguration configuration, ILogger? logger = null, IHttpContextAccessor? httpContextAccessor = null)
+
+    public DbContextBase(IConfiguration configuration, ILogger? logger = null,
+        IHttpContextAccessor? httpContextAccessor = null)
     {
         _configuration = configuration;
         _logger = logger;
         _httpContextAccessor = httpContextAccessor;
     }
-    
+
     protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
     {
         if (!optionsBuilder.IsConfigured)
@@ -71,7 +73,11 @@ public class DbContextBase : DbContext
         }
 
         foreach (var entry in ChangeTracker.Entries()
-                     .Where(e => e.Entity.GetType().IsSubclassOf(typeof(AuditBase<>)) && (e.State == EntityState.Added || e.State == EntityState.Modified || e.State == EntityState.Deleted)))
+                     .Where(e => e.Entity.GetType().BaseType != null &&
+                                 e.Entity.GetType().BaseType.IsGenericType &&
+                                 e.Entity.GetType().BaseType.GetGenericTypeDefinition() == typeof(AuditBase<>) &&
+                                 (e.State == EntityState.Added || e.State == EntityState.Modified ||
+                                  e.State == EntityState.Deleted)))
         {
             dynamic entity = entry.Entity;
             var now = DateTime.UtcNow;
@@ -87,7 +93,6 @@ public class DbContextBase : DbContext
                 case EntityState.Modified:
                     entity.UpdatedAt = now;
                     entity.UpdatedBy = parsedUserId;
-                    // Evitar modificar las fechas de creación y eliminación
                     entry.Property("CreatedAt").IsModified = false;
                     entry.Property("CreatedBy").IsModified = false;
                     entry.Property("DeletedAt").IsModified = false;
