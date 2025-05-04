@@ -45,4 +45,8 @@
       <PackageReference Include="System.Threading.Tasks.Extensions" Version="4.6.3" />
     </ItemGroup>
 
+    <ItemGroup>
+      <Content Include=".github\workflows\dotnet.yml" />
+    </ItemGroup>
+
 </Project>

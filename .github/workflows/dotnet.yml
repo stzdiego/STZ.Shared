@@ -1,0 +1,35 @@
+name: Build and Publish NuGet
+
+on:
+  push:
+    branches: [ "main" ]
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 9.0.x
+          
+      - name: Set timestamp-based version
+        id: versioning
+        run: |
+          VERSION=$(printf "%02d.%02d.%02d.%02d%02d" $(date +"%y %m %d %H %M"))
+          echo "Generated version: $VERSION"
+          for file in *.csproj; do
+            sed -i "s|<Version>.*</Version>|<Version>${VERSION}</Version>|" "$file"
+          done
+          echo "PACKAGE_VERSION=$VERSION" >> $GITHUB_ENV
+
+      - name: Restore, Build, Pack and Push
+        run: |
+          dotnet restore
+          dotnet build --configuration Release
+          dotnet pack --configuration Release --output ./nupkgs
+          dotnet nuget push ./nupkgs/*.nupkg --source https://api.nuget.org/v3/index.json --api-key ${{ secrets.NUGET_API_KEY }} --skip-duplicate          
