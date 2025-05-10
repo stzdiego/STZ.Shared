@@ -2,16 +2,18 @@ using System.Reflection;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Microsoft.AspNetCore.Http;
+using Microsoft.EntityFrameworkCore;
 
 namespace STZ.Shared.Bases;
-
-using Microsoft.EntityFrameworkCore;
 
 public class DbContextBase : DbContext
 {
     private readonly IConfiguration _configuration;
     private readonly ILogger? _logger;
     private readonly IHttpContextAccessor? _httpContextAccessor;
+
+    // Permite controlar si el contexto debe realizar soft delete
+    public bool EnableSoftDelete { get; set; } = true;
 
     public DbContextBase(IConfiguration configuration, ILogger? logger = null,
         IHttpContextAccessor? httpContextAccessor = null)
@@ -100,10 +102,14 @@ public class DbContextBase : DbContext
                     break;
 
                 case EntityState.Deleted:
-                    entity.DeletedAt = now;
-                    entity.DeletedBy = parsedUserId;
-                    entity.IsDeleted = true;
-                    entry.State = EntityState.Modified; // Soft delete
+                    if (EnableSoftDelete)
+                    {
+                        entity.DeletedAt = now;
+                        entity.DeletedBy = parsedUserId;
+                        entity.IsDeleted = true;
+                        entry.State = EntityState.Modified; // Soft delete
+                    }
+
                     break;
             }
         }

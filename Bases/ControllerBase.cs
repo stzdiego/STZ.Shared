@@ -45,10 +45,7 @@ public class StzControllerBase<T> : ControllerBase where T : class
             }
 
             // Filtro por SoftDelete si aplica
-            if (typeof(T).IsSubclassOf(typeof(AuditBase<>)))
-            {
-                query = query.Where(x => !IsDeleted(x));
-            }
+            query = ApplySoftDeleteFilter(query);
 
             // Filtro por búsqueda si se envía
             if (!string.IsNullOrWhiteSpace(search))
@@ -93,7 +90,10 @@ public class StzControllerBase<T> : ControllerBase where T : class
     {
         try
         {
-            var response = await _dbContext.Set<T>().Where(predicate).ToListAsync();
+            var query = _dbContext.Set<T>().Where(predicate);
+            query = ApplySoftDeleteFilter(query);
+            var response = await query.ToListAsync();
+            
             return Ok(new { response.Count, items = response });
         }
         catch (Exception e)
@@ -136,7 +136,9 @@ public class StzControllerBase<T> : ControllerBase where T : class
             }
             else
             {
-                result = await _dbContext.Set<T>().FindAsync(entityId);
+                var query = _dbContext.Set<T>().Where(e => EF.Property<object>(e, "Id").Equals(entityId));
+                query = ApplySoftDeleteFilter(query);
+                result = await query.FirstOrDefaultAsync();
             }
 
             if (result == null)
@@ -150,6 +152,34 @@ public class StzControllerBase<T> : ControllerBase where T : class
         {
             _logger.LogError(e, e.Message);
             return StatusCode(500, "Internal server error");
+        }
+    }
+
+    [HttpGet("exists")]
+    public async Task<IActionResult> ExistsAsync([FromQuery] string property, [FromQuery] string value)
+    {
+        try
+        {
+            var propInfo = typeof(T).GetProperty(property);
+            if (propInfo == null)
+                return BadRequest($"La propiedad '{property}' no existe en el tipo '{typeof(T).Name}'.");
+
+            // Convertir el valor al tipo real de la propiedad
+            var convertedValue = Convert.ChangeType(value, propInfo.PropertyType);
+
+            var parameter = Expression.Parameter(typeof(T), "x");
+            var propertyAccess = Expression.Property(parameter, propInfo);
+            var constant = Expression.Constant(convertedValue, propInfo.PropertyType);
+            var equals = Expression.Equal(propertyAccess, constant);
+            var lambda = Expression.Lambda<Func<T, bool>>(equals, parameter);
+
+            var exists = await _dbContext.Set<T>().AnyAsync(lambda);
+            return Ok(exists);
+        }
+        catch (Exception e)
+        {
+            _logger.LogError(e, e.Message);
+            return StatusCode(500, "Error interno del servidor");
         }
     }
 
@@ -214,31 +244,44 @@ public class StzControllerBase<T> : ControllerBase where T : class
     }
 
     [HttpDelete("{id}")]
-    public async Task<IActionResult> Delete([FromRoute] string id)
+    public async Task<IActionResult> Delete([FromRoute] string id, [FromQuery] bool softDelete = false)
     {
         try
         {
-            object entityId;
-            var idPropertyType = typeof(T).GetProperty("Id")?.PropertyType;
+            var idProperty = typeof(T).GetProperty("Id");
+            if (idProperty == null)
+                return BadRequest("La entidad no tiene una propiedad 'Id'.");
 
-            if (idPropertyType == typeof(Guid))
-            {
-                entityId = Guid.Parse(id);
-            }
-            else
-            {
-                entityId = Convert.ChangeType(id, idPropertyType);
-            }
-            
+            object entityId = idProperty.PropertyType == typeof(Guid)
+                ? Guid.Parse(id)
+                : Convert.ChangeType(id, idProperty.PropertyType);
+
             var entity = await _dbContext.Set<T>().FindAsync(entityId);
             if (entity == null)
             {
                 return NotFound();
             }
 
-            _dbContext.Set<T>().Remove(entity);
-            await _dbContext.SaveChangesAsync();
+            if (softDelete)
+            {
+                var isDeletedProperty = typeof(T).GetProperty("IsDeleted");
+                if (isDeletedProperty != null && isDeletedProperty.PropertyType == typeof(bool))
+                {
+                    isDeletedProperty.SetValue(entity, true);
+                    _dbContext.Entry(entity).State = EntityState.Modified;
+                }
+                else
+                {
+                    return BadRequest("La entidad no soporta eliminación lógica (IsDeleted no existe o no es booleano).");
+                }
+            }
+            else
+            {
+                _dbContext.EnableSoftDelete = false;
+                _dbContext.Set<T>().Remove(entity);
+            }
 
+            await _dbContext.SaveChangesAsync();
             return StatusCode(204, "Eliminado correctamente");
         }
         catch (Exception e)
@@ -288,5 +331,22 @@ public class StzControllerBase<T> : ControllerBase where T : class
         return combinedExpression != null
             ? Expression.Lambda<Func<T, bool>>(combinedExpression, parameter)
             : x => true;
+    }
+    
+    private IQueryable<T> ApplySoftDeleteFilter(IQueryable<T> query)
+    {
+        var isDeletedProperty = typeof(T).GetProperty("IsDeleted");
+        if (isDeletedProperty != null && isDeletedProperty.PropertyType == typeof(bool))
+        {
+            var parameter = Expression.Parameter(typeof(T), "x");
+            var propertyAccess = Expression.Property(parameter, isDeletedProperty);
+            var falseConstant = Expression.Constant(false);
+            var notDeleted = Expression.Equal(propertyAccess, falseConstant);
+            var lambda = Expression.Lambda<Func<T, bool>>(notDeleted, parameter);
+
+            query = query.Where(lambda);
+        }
+
+        return query;
     }
 }

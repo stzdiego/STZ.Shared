@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using Microsoft.Extensions.Configuration;
 using MudBlazor;
 using Humanizer;
+using Microsoft.AspNetCore.Mvc;
 using STZ.Shared.Dtos;
 
 namespace STZ.Shared.Bases;
@@ -48,9 +49,9 @@ public class ServiceBase<T> where T : class
         await HttpClient.PutAsJsonAsync($"{Endpoint}/{id}", entity);
     }
 
-    public async Task DeleteAsync(object id)
+    public async Task DeleteAsync(object id, bool softDelete = false)
     {
-        await HttpClient.DeleteAsync($"{Endpoint}/{id}");
+        await HttpClient.DeleteAsync($"{Endpoint}/{id}?softDelete={softDelete}");
     }
     
     public async Task<GridData<T>> LoadServerData(GridState<T> state, string? searchString = null, CancellationToken cancellationToken = default)
@@ -115,5 +116,20 @@ public class ServiceBase<T> where T : class
             throw;
         }
         
+    }
+
+    public async Task<bool> ExistsAsync(string property, object value)
+    {
+        try
+        {
+            var response = await HttpClient.GetFromJsonAsync<bool>($"{Endpoint}/exists?property={property}&value={Uri.EscapeDataString(value.ToString()!)}");
+           
+            return response;
+        }
+        catch (Exception e)
+        {
+            Console.WriteLine(e);
+            throw;
+        }
     }
 }
