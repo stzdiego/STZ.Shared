@@ -233,6 +233,7 @@ public class StzControllerBase<T> : ControllerBase where T : class
             
             _dbContext.Set<T>().Add(entity);
             await _dbContext.SaveChangesAsync();
+            await OnAfterPostAsync(entity);
 
             return CreatedAtAction("Get", new { id = GetEntityId(entity) }, entity);
         }
@@ -289,6 +290,11 @@ public class StzControllerBase<T> : ControllerBase where T : class
             _logger.LogError(e, e.Message);
             return StatusCode(500, "Internal server error");
         }
+    }
+    
+    protected virtual Task OnAfterPostAsync(T entity)
+    {
+        return Task.CompletedTask;
     }
 
     private static object GetEntityId(T entity)
